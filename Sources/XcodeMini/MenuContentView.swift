@@ -51,7 +51,7 @@ struct MenuContentView: View {
     private var statusContent: some View {
         switch controller.access {
         case .ok:
-            if controller.workspaceName == nil {
+            if controller.workspaces.isEmpty {
                 notice("Xcodeでworkspaceが開かれていません", systemImage: "folder.badge.questionmark")
             } else {
                 controls
@@ -75,14 +75,7 @@ struct MenuContentView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "macwindow").foregroundStyle(.secondary)
-                Text(controller.workspaceName ?? "")
-                    .font(.subheadline)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
+            workspacePicker
             schemePicker
             destinationPicker
 
@@ -103,6 +96,19 @@ struct MenuContentView: View {
         }
     }
 
+    private var workspacePicker: some View {
+        Picker("Workspace", selection: Binding(
+            get: { controller.selectedWorkspaceIndex },
+            set: { controller.selectWorkspace($0) }
+        )) {
+            Text("—").tag(Int?.none)
+            ForEach(Array(controller.workspaces.enumerated()), id: \.offset) { idx, ws in
+                Text(ws.name).tag(Int?(idx))
+            }
+        }
+        .pickerStyle(.menu)
+    }
+
     private var schemePicker: some View {
         Picker("Scheme", selection: Binding(
             get: { controller.selectedSchemeIndex },
@@ -114,6 +120,7 @@ struct MenuContentView: View {
             }
         }
         .pickerStyle(.menu)
+        .disabled(controller.selectedWorkspaceIndex == nil)
     }
 
     private var destinationPicker: some View {

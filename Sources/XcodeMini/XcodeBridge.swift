@@ -57,6 +57,9 @@ import ScriptingBridge
 
 @objc protocol XcodeApplication {
     @objc optional var activeWorkspaceDocument: XcodeWorkspaceDocument { get }
+    // Returns every open document (workspaces, text documents, …); callers
+    // filter to workspace documents by name suffix.
+    @objc optional func documents() -> [XcodeWorkspaceDocument]
 }
 
 // Declare conformance so dynamic ScriptingBridge objects satisfy `as?` casts.
