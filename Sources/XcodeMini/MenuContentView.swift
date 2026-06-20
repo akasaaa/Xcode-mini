@@ -31,7 +31,7 @@ struct MenuContentView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
-            .help("更新")
+            .help("Refresh")
         }
     }
 
@@ -40,8 +40,8 @@ struct MenuContentView: View {
     @ViewBuilder
     private var content: some View {
         if !controller.hasLoadedOnce {
-            // 初回のみ。以降は前回の値を保ったまま裏で更新する。
-            notice("読み込み中…", systemImage: "hourglass")
+            // First open only; afterwards the previous values stay while we refresh.
+            notice("Loading…", systemImage: "hourglass")
         } else {
             statusContent
         }
@@ -52,22 +52,22 @@ struct MenuContentView: View {
         switch controller.access {
         case .ok:
             if controller.workspaces.isEmpty {
-                notice("Xcodeでworkspaceが開かれていません", systemImage: "folder.badge.questionmark")
+                notice("No workspace open in Xcode", systemImage: "folder.badge.questionmark")
             } else {
                 controls
             }
         case .notDetermined:
             VStack(alignment: .leading, spacing: 8) {
-                notice("XcodeMiniにXcodeの操作を許可してください", systemImage: "lock.shield")
-                Button("アクセスを許可") { controller.requestAccess() }
+                notice("Allow XcodeMini to control Xcode", systemImage: "lock.shield")
+                Button("Allow Access") { controller.requestAccess() }
             }
         case .denied:
             VStack(alignment: .leading, spacing: 8) {
-                notice("Xcodeの操作が許可されていません", systemImage: "lock.slash")
-                Button("システム設定を開く") { controller.openAutomationSettings() }
+                notice("XcodeMini isn’t allowed to control Xcode", systemImage: "lock.slash")
+                Button("Open Settings") { controller.openAutomationSettings() }
             }
         case .xcodeNotRunning:
-            notice("Xcodeが起動していません", systemImage: "xmark.circle")
+            notice("Xcode isn’t running", systemImage: "xmark.circle")
         }
     }
 
@@ -81,14 +81,14 @@ struct MenuContentView: View {
 
             HStack(spacing: 8) {
                 Button(action: controller.run) {
-                    Label("実行", systemImage: "play.fill")
+                    Label("Run", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!controller.canRun)
 
                 Button(action: controller.stop) {
-                    Label("停止", systemImage: "stop.fill")
+                    Label("Stop", systemImage: "stop.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .disabled(!controller.canStop)
@@ -146,7 +146,7 @@ struct MenuContentView: View {
     private var footer: some View {
         HStack {
             Spacer()
-            Button("終了") { NSApplication.shared.terminate(nil) }
+            Button("Quit") { NSApplication.shared.terminate(nil) }
                 .keyboardShortcut("q")
         }
     }
