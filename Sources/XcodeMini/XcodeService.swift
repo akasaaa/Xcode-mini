@@ -66,6 +66,10 @@ final class XcodeService: @unchecked Sendable {
     /// choice survives list reordering across refreshes.
     private var selectedWorkspaceKey: String?
     private var didInitSelection = false
+    /// Identity (name|platform) of the chosen run destination. Xcode reports
+    /// `activeRunDestination` as `missing value` over ScriptingBridge, so we
+    /// remember the choice to restore it across refreshes.
+    private var selectedDestinationKey: String?
 
     // MARK: - Async reads (return a snapshot)
 
@@ -113,9 +117,9 @@ final class XcodeService: @unchecked Sendable {
 
     func selectDestination(index: Int) {
         queue.async {
-            if let doc = self.selectedDocument(), self.cachedDestinations.indices.contains(index) {
-                doc.setActiveRunDestination?(self.cachedDestinations[index])
-            }
+            guard self.cachedDestinations.indices.contains(index) else { return }
+            self.selectedDestinationKey = self.destKey(self.cachedDestinations[index])
+            self.selectedDocument()?.setActiveRunDestination?(self.cachedDestinations[index])
         }
     }
 
@@ -186,10 +190,16 @@ final class XcodeService: @unchecked Sendable {
         let destInfos = cachedDestinations.map {
             DestinationInfo(name: $0.name ?? "(no name)", platform: $0.platform ?? "")
         }
-        let activeDest = doc.activeRunDestination
-        let destIndex = cachedDestinations.firstIndex {
-            $0.name == activeDest?.name && $0.platform == activeDest?.platform
+        // `activeRunDestination` comes back as `missing value` over
+        // ScriptingBridge, so prefer it when present but fall back to the
+        // remembered choice; otherwise the selection resets on every reopen.
+        var destIndex = destKey(doc.activeRunDestination).flatMap { activeKey in
+            cachedDestinations.firstIndex { destKey($0) == activeKey }
         }
+        if destIndex == nil, let remembered = selectedDestinationKey {
+            destIndex = cachedDestinations.firstIndex { destKey($0) == remembered }
+        }
+        if let destIndex { selectedDestinationKey = destKey(cachedDestinations[destIndex]) }
 
         return WorkspaceSnapshot(access: .ok, workspaces: workspaceInfos,
                                  schemes: schemeInfos, destinations: destInfos,
@@ -233,6 +243,11 @@ final class XcodeService: @unchecked Sendable {
     private func key(_ doc: XcodeWorkspaceDocument?) -> String? {
         guard let doc else { return nil }
         return doc.path ?? doc.name
+    }
+
+    private func destKey(_ destination: XcodeRunDestination?) -> String? {
+        guard let destination, let name = destination.name else { return nil }
+        return "\(name)|\(destination.platform ?? "")"
     }
 
     /// Scheme names the toolbar hides (`isShown = false` in any
