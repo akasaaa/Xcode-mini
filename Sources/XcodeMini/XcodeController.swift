@@ -13,9 +13,10 @@ import Observation
 final class XcodeController {
 
     private(set) var access: XcodeAccess = .notDetermined
-    private(set) var workspaceName: String?
+    private(set) var workspaces: [WorkspaceInfo] = []
     private(set) var schemes: [SchemeInfo] = []
     private(set) var destinations: [DestinationInfo] = []
+    private(set) var selectedWorkspaceIndex: Int?
     private(set) var selectedSchemeIndex: Int?
     private(set) var selectedDestinationIndex: Int?
 
@@ -49,6 +50,20 @@ final class XcodeController {
 
     // MARK: - Selection
 
+    func selectWorkspace(_ index: Int?) {
+        // Optimistic update; schemes/destinations belong to the previous workspace.
+        selectedWorkspaceIndex = index
+        schemes = []
+        destinations = []
+        selectedSchemeIndex = nil
+        selectedDestinationIndex = nil
+        let token = beginLoad()
+        Task {
+            let snapshot = await service.selectWorkspace(index: index)
+            apply(snapshot, token: token)
+        }
+    }
+
     func selectScheme(_ index: Int?) {
         // Optimistic update so the picker responds instantly.
         selectedSchemeIndex = index
@@ -73,11 +88,16 @@ final class XcodeController {
     // MARK: - Scheme actions (fire-and-forget)
 
     var canRun: Bool {
-        access == .ok && selectedSchemeIndex != nil && selectedDestinationIndex != nil
+        access == .ok
+            && selectedWorkspaceIndex != nil
+            && selectedSchemeIndex != nil
+            && selectedDestinationIndex != nil
     }
 
     var canStop: Bool {
-        access == .ok && selectedSchemeIndex != nil
+        access == .ok
+            && selectedWorkspaceIndex != nil
+            && selectedSchemeIndex != nil
     }
 
     func run() {
@@ -108,9 +128,10 @@ final class XcodeController {
         // Discard if a newer request superseded this one.
         guard token == loadToken else { return }
         access = snapshot.access
-        workspaceName = snapshot.workspaceName
+        workspaces = snapshot.workspaces
         schemes = snapshot.schemes
         destinations = snapshot.destinations
+        selectedWorkspaceIndex = snapshot.selectedWorkspaceIndex
         selectedSchemeIndex = snapshot.selectedSchemeIndex
         selectedDestinationIndex = snapshot.selectedDestinationIndex
         hasLoadedOnce = true

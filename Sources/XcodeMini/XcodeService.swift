@@ -12,6 +12,10 @@ enum XcodeAccess: Sendable {
 
 /// Plain, Sendable value types handed to the main actor for display.
 /// SBObjects never cross the actor boundary.
+struct WorkspaceInfo: Sendable {
+    let name: String
+}
+
 struct SchemeInfo: Sendable {
     let name: String
 }
@@ -23,17 +27,27 @@ struct DestinationInfo: Sendable {
 
 struct WorkspaceSnapshot: Sendable {
     var access: XcodeAccess
-    var workspaceName: String?
+    var workspaces: [WorkspaceInfo]
     var schemes: [SchemeInfo]
     var destinations: [DestinationInfo]
+    var selectedWorkspaceIndex: Int?
     var selectedSchemeIndex: Int?
     var selectedDestinationIndex: Int?
+
+    static func empty(_ access: XcodeAccess) -> WorkspaceSnapshot {
+        WorkspaceSnapshot(access: access, workspaces: [], schemes: [], destinations: [],
+                          selectedWorkspaceIndex: nil, selectedSchemeIndex: nil,
+                          selectedDestinationIndex: nil)
+    }
 }
 
 /// Performs all ScriptingBridge (Apple Events) work on a private serial queue,
 /// off the main thread, and returns Sendable snapshots. Apple Events are
 /// synchronous IPC round trips, so running them on the main thread janks the
-/// menu popover while it is opening. Keeping them here keeps the UI smooth.
+/// menu popover while it is opening.
+///
+/// All operations target the *selected* workspace document (chosen in the UI),
+/// not necessarily Xcode's frontmost one.
 ///
 /// `@unchecked Sendable`: this holds non-Sendable SBObjects, but every access
 /// to them is confined to `queue`, which serializes all work.
@@ -44,10 +58,14 @@ final class XcodeService: @unchecked Sendable {
 
     private lazy var app: XcodeApplication? = SBApplication(bundleIdentifier: bundleID)
 
-    // Touched only on `queue`. Used to resolve a picker selection (by index)
-    // back to the concrete SBObject needed for setActive… / run.
+    // Touched only on `queue`.
+    private var cachedWorkspaces: [XcodeWorkspaceDocument] = []
     private var cachedSchemes: [XcodeScheme] = []
     private var cachedDestinations: [XcodeRunDestination] = []
+    /// Identity (path, falling back to name) of the selected workspace, so the
+    /// choice survives list reordering across refreshes.
+    private var selectedWorkspaceKey: String?
+    private var didInitSelection = false
 
     // MARK: - Async reads (return a snapshot)
 
@@ -66,11 +84,24 @@ final class XcodeService: @unchecked Sendable {
         }
     }
 
+    func selectWorkspace(index: Int?) async -> WorkspaceSnapshot {
+        await withCheckedContinuation { cont in
+            queue.async {
+                if let index, self.cachedWorkspaces.indices.contains(index) {
+                    self.selectedWorkspaceKey = self.key(self.cachedWorkspaces[index])
+                } else {
+                    self.selectedWorkspaceKey = nil
+                }
+                self.didInitSelection = true
+                cont.resume(returning: self.loadSnapshot())
+            }
+        }
+    }
+
     func selectScheme(index: Int) async -> WorkspaceSnapshot {
         await withCheckedContinuation { cont in
             queue.async {
-                if self.cachedSchemes.indices.contains(index),
-                   let doc = self.app?.activeWorkspaceDocument {
+                if let doc = self.selectedDocument(), self.cachedSchemes.indices.contains(index) {
                     doc.setActiveScheme?(self.cachedSchemes[index])
                 }
                 cont.resume(returning: self.loadSnapshot())
@@ -82,8 +113,7 @@ final class XcodeService: @unchecked Sendable {
 
     func selectDestination(index: Int) {
         queue.async {
-            if self.cachedDestinations.indices.contains(index),
-               let doc = self.app?.activeWorkspaceDocument {
+            if let doc = self.selectedDocument(), self.cachedDestinations.indices.contains(index) {
                 doc.setActiveRunDestination?(self.cachedDestinations[index])
             }
         }
@@ -91,51 +121,49 @@ final class XcodeService: @unchecked Sendable {
 
     func run() {
         queue.async {
-            _ = self.app?.activeWorkspaceDocument?
+            _ = self.selectedDocument()?
                 .runWithCommandLineArguments?(nil, withEnvironmentVariables: nil)
         }
     }
 
     func stop() {
         queue.async {
-            self.app?.activeWorkspaceDocument?.stop?()
+            self.selectedDocument()?.stop?()
         }
     }
 
     // MARK: - Queue-confined implementation
 
     private func loadSnapshot() -> WorkspaceSnapshot {
-        guard isXcodeRunning else {
-            cachedSchemes = []
-            cachedDestinations = []
-            return WorkspaceSnapshot(access: .xcodeNotRunning, workspaceName: nil,
-                                     schemes: [], destinations: [],
-                                     selectedSchemeIndex: nil, selectedDestinationIndex: nil)
-        }
+        guard isXcodeRunning else { resetCaches(); return .empty(.xcodeNotRunning) }
 
         let permission = checkPermission(prompt: false)
-        guard permission == .ok else {
+        guard permission == .ok else { resetCaches(); return .empty(permission) }
+
+        cachedWorkspaces = listWorkspaces()
+        let workspaceInfos = cachedWorkspaces.map { WorkspaceInfo(name: $0.name ?? "(workspace)") }
+
+        // Default to the active workspace on first load; afterwards respect the
+        // user's choice (including an explicit deselection or a closed workspace).
+        if !didInitSelection {
+            selectedWorkspaceKey = key(app?.activeWorkspaceDocument)
+            didInitSelection = true
+        }
+
+        guard let wsIndex = indexOfSelectedWorkspace() else {
             cachedSchemes = []
             cachedDestinations = []
-            return WorkspaceSnapshot(access: permission, workspaceName: nil,
+            return WorkspaceSnapshot(access: .ok, workspaces: workspaceInfos,
                                      schemes: [], destinations: [],
+                                     selectedWorkspaceIndex: nil,
                                      selectedSchemeIndex: nil, selectedDestinationIndex: nil)
         }
 
-        guard let doc = app?.activeWorkspaceDocument else {
-            cachedSchemes = []
-            cachedDestinations = []
-            return WorkspaceSnapshot(access: .ok, workspaceName: nil,
-                                     schemes: [], destinations: [],
-                                     selectedSchemeIndex: nil, selectedDestinationIndex: nil)
-        }
-
-        let name = doc.name ?? "(workspace)"
+        let doc = cachedWorkspaces[wsIndex]
         let activeSchemeName = doc.activeScheme?.name
 
-        // `schemes` returns every scheme Xcode knows about, including the
-        // auto-generated dependency schemes (CocoaPods / SwiftPM) that the
-        // toolbar hides. Filter to the ones marked shown in
+        // `schemes` includes the auto-generated dependency schemes (CocoaPods /
+        // SwiftPM) the toolbar hides. Filter to the ones marked shown in
         // xcschememanagement.plist (the active scheme is always kept).
         let hidden = hiddenSchemeNames(workspacePath: doc.path)
         cachedSchemes = (doc.schemes?() ?? []).filter { scheme in
@@ -148,8 +176,9 @@ final class XcodeService: @unchecked Sendable {
         // Run destinations are scheme-dependent: only meaningful with an active scheme.
         guard schemeIndex != nil else {
             cachedDestinations = []
-            return WorkspaceSnapshot(access: .ok, workspaceName: name,
+            return WorkspaceSnapshot(access: .ok, workspaces: workspaceInfos,
                                      schemes: schemeInfos, destinations: [],
+                                     selectedWorkspaceIndex: wsIndex,
                                      selectedSchemeIndex: nil, selectedDestinationIndex: nil)
         }
 
@@ -162,9 +191,48 @@ final class XcodeService: @unchecked Sendable {
             $0.name == activeDest?.name && $0.platform == activeDest?.platform
         }
 
-        return WorkspaceSnapshot(access: .ok, workspaceName: name,
+        return WorkspaceSnapshot(access: .ok, workspaces: workspaceInfos,
                                  schemes: schemeInfos, destinations: destInfos,
+                                 selectedWorkspaceIndex: wsIndex,
                                  selectedSchemeIndex: schemeIndex, selectedDestinationIndex: destIndex)
+    }
+
+    private func resetCaches() {
+        cachedWorkspaces = []
+        cachedSchemes = []
+        cachedDestinations = []
+    }
+
+    /// Open workspace documents: every document whose name ends with
+    /// `.xcworkspace` / `.xcodeproj`, plus the active workspace (deduped).
+    private func listWorkspaces() -> [XcodeWorkspaceDocument] {
+        var result: [XcodeWorkspaceDocument] = []
+        var seen = Set<String>()
+        for doc in app?.documents?() ?? [] {
+            guard let name = doc.name,
+                  name.hasSuffix(".xcworkspace") || name.hasSuffix(".xcodeproj") else { continue }
+            let k = key(doc) ?? name
+            if seen.insert(k).inserted { result.append(doc) }
+        }
+        if let active = app?.activeWorkspaceDocument, let ak = key(active), seen.insert(ak).inserted {
+            result.insert(active, at: 0)
+        }
+        return result
+    }
+
+    private func indexOfSelectedWorkspace() -> Int? {
+        guard let selectedWorkspaceKey else { return nil }
+        return cachedWorkspaces.firstIndex { key($0) == selectedWorkspaceKey }
+    }
+
+    private func selectedDocument() -> XcodeWorkspaceDocument? {
+        guard let index = indexOfSelectedWorkspace() else { return nil }
+        return cachedWorkspaces[index]
+    }
+
+    private func key(_ doc: XcodeWorkspaceDocument?) -> String? {
+        guard let doc else { return nil }
+        return doc.path ?? doc.name
     }
 
     /// Scheme names the toolbar hides (`isShown = false` in any
