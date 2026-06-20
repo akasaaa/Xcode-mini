@@ -131,9 +131,18 @@ final class XcodeService: @unchecked Sendable {
         }
 
         let name = doc.name ?? "(workspace)"
-        cachedSchemes = doc.schemes?() ?? []
-        let schemeInfos = cachedSchemes.map { SchemeInfo(name: $0.name ?? "(no name)") }
         let activeSchemeName = doc.activeScheme?.name
+
+        // `schemes` returns every scheme Xcode knows about, including the
+        // auto-generated dependency schemes (CocoaPods / SwiftPM) that the
+        // toolbar hides. Filter to the ones marked shown in
+        // xcschememanagement.plist (the active scheme is always kept).
+        let hidden = hiddenSchemeNames(workspacePath: doc.path)
+        cachedSchemes = (doc.schemes?() ?? []).filter { scheme in
+            let n = scheme.name ?? ""
+            return !hidden.contains(n) || n == activeSchemeName
+        }
+        let schemeInfos = cachedSchemes.map { SchemeInfo(name: $0.name ?? "(no name)") }
         let schemeIndex = cachedSchemes.firstIndex { $0.name == activeSchemeName }
 
         // Run destinations are scheme-dependent: only meaningful with an active scheme.
@@ -156,6 +165,53 @@ final class XcodeService: @unchecked Sendable {
         return WorkspaceSnapshot(access: .ok, workspaceName: name,
                                  schemes: schemeInfos, destinations: destInfos,
                                  selectedSchemeIndex: schemeIndex, selectedDestinationIndex: destIndex)
+    }
+
+    /// Scheme names the toolbar hides (`isShown = false` in any
+    /// xcschememanagement.plist under the workspace container). An absent entry
+    /// means shown, so only explicitly-hidden schemes end up here.
+    private func hiddenSchemeNames(workspacePath: String?) -> Set<String> {
+        guard let workspacePath else { return [] }
+        let fm = FileManager.default
+        let container = (workspacePath as NSString).deletingLastPathComponent
+
+        // Bundles that may carry xcuserdata: the workspace itself plus every
+        // .xcodeproj at depth 1-2 (covers Pods/Pods.xcodeproj).
+        var bundles: [String] = [workspacePath]
+        for entry in (try? fm.contentsOfDirectory(atPath: container)) ?? [] {
+            let path = (container as NSString).appendingPathComponent(entry)
+            if entry.hasSuffix(".xcodeproj") {
+                bundles.append(path)
+            } else {
+                for sub in (try? fm.contentsOfDirectory(atPath: path)) ?? []
+                where sub.hasSuffix(".xcodeproj") {
+                    bundles.append((path as NSString).appendingPathComponent(sub))
+                }
+            }
+        }
+
+        var hidden = Set<String>()
+        for bundle in bundles {
+            let userdata = (bundle as NSString).appendingPathComponent("xcuserdata")
+            for user in (try? fm.contentsOfDirectory(atPath: userdata)) ?? []
+            where user.hasSuffix(".xcuserdatad") {
+                let plist = "\(userdata)/\(user)/xcschemes/xcschememanagement.plist"
+                guard let dict = NSDictionary(contentsOfFile: plist),
+                      let states = dict["SchemeUserState"] as? [String: Any] else { continue }
+                for (key, value) in states {
+                    let state = value as? [String: Any]
+                    let isShown = (state?["isShown"] as? Bool) ?? true
+                    if !isShown { hidden.insert(schemeBaseName(key)) }
+                }
+            }
+        }
+        return hidden
+    }
+
+    /// "EXConstants.xcscheme_^#shared#^_" -> "EXConstants"
+    private func schemeBaseName(_ key: String) -> String {
+        guard let range = key.range(of: ".xcscheme") else { return key }
+        return String(key[..<range.lowerBound])
     }
 
     private var isXcodeRunning: Bool {

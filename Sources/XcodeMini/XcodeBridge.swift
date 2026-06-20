@@ -33,6 +33,7 @@ import ScriptingBridge
 @objc protocol XcodeWorkspaceDocument {
     // inherited from `document`
     @objc optional var name: String { get }
+    @objc optional var path: String { get }
 
     // elements (SBElementArray bridges to Swift Array)
     @objc optional func schemes() -> [XcodeScheme]
