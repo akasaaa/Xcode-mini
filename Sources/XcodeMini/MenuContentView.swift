@@ -24,6 +24,9 @@ struct MenuContentView: View {
             Image(systemName: "hammer.fill").foregroundStyle(.secondary)
             Text("XcodeMini").font(.headline)
             Spacer()
+            if controller.isLoading {
+                ProgressView().controlSize(.small)
+            }
             Button(action: controller.refresh) {
                 Image(systemName: "arrow.clockwise")
             }
@@ -36,6 +39,16 @@ struct MenuContentView: View {
 
     @ViewBuilder
     private var content: some View {
+        if !controller.hasLoadedOnce {
+            // 初回のみ。以降は前回の値を保ったまま裏で更新する。
+            notice("読み込み中…", systemImage: "hourglass")
+        } else {
+            statusContent
+        }
+    }
+
+    @ViewBuilder
+    private var statusContent: some View {
         switch controller.access {
         case .ok:
             if controller.workspaceName == nil {
@@ -97,7 +110,7 @@ struct MenuContentView: View {
         )) {
             Text("—").tag(Int?.none)
             ForEach(Array(controller.schemes.enumerated()), id: \.offset) { idx, scheme in
-                Text(scheme.name ?? "(no name)").tag(Int?(idx))
+                Text(scheme.name).tag(Int?(idx))
             }
         }
         .pickerStyle(.menu)
@@ -114,15 +127,11 @@ struct MenuContentView: View {
             }
         }
         .pickerStyle(.menu)
-        .disabled(controller.selectedSchemeIndex == nil)
+        .disabled(controller.selectedSchemeIndex == nil || controller.isLoading)
     }
 
-    private func destinationLabel(_ dest: XcodeRunDestination) -> String {
-        let name = dest.name ?? "(no name)"
-        if let platform = dest.platform, !platform.isEmpty {
-            return "\(name) — \(platform)"
-        }
-        return name
+    private func destinationLabel(_ dest: DestinationInfo) -> String {
+        dest.platform.isEmpty ? dest.name : "\(dest.name) — \(dest.platform)"
     }
 
     // MARK: - Footer
