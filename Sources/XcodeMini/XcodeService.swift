@@ -66,10 +66,13 @@ final class XcodeService: @unchecked Sendable {
     /// choice survives list reordering across refreshes.
     private var selectedWorkspaceKey: String?
     private var didInitSelection = false
-    /// Identity (name|platform) of the chosen run destination. Xcode reports
+    /// Last-used run destination (name|platform) keyed by (workspace, scheme),
+    /// persisted to UserDefaults so it survives app restarts. Xcode reports
     /// `activeRunDestination` as `missing value` over ScriptingBridge, so we
     /// remember the choice to restore it across refreshes.
-    private var selectedDestinationKey: String?
+    private static let destinationsDefaultsKey = "lastDestinationByContext"
+    private lazy var lastDestinationByContext: [String: String] =
+        (UserDefaults.standard.dictionary(forKey: Self.destinationsDefaultsKey) as? [String: String]) ?? [:]
 
     // MARK: - Async reads (return a snapshot)
 
@@ -117,9 +120,13 @@ final class XcodeService: @unchecked Sendable {
 
     func selectDestination(index: Int) {
         queue.async {
-            guard self.cachedDestinations.indices.contains(index) else { return }
-            self.selectedDestinationKey = self.destKey(self.cachedDestinations[index])
-            self.selectedDocument()?.setActiveRunDestination?(self.cachedDestinations[index])
+            guard self.cachedDestinations.indices.contains(index),
+                  let doc = self.selectedDocument() else { return }
+            let chosen = self.cachedDestinations[index]
+            let context = self.destinationContextKey(workspaceKey: self.key(doc),
+                                                     schemeName: doc.activeScheme?.name)
+            self.remember(destinationKey: self.destKey(chosen), for: context)
+            doc.setActiveRunDestination?(chosen)
         }
     }
 
@@ -190,16 +197,22 @@ final class XcodeService: @unchecked Sendable {
         let destInfos = cachedDestinations.map {
             DestinationInfo(name: $0.name ?? "(no name)", platform: $0.platform ?? "")
         }
-        // `activeRunDestination` comes back as `missing value` over
-        // ScriptingBridge, so prefer it when present but fall back to the
-        // remembered choice; otherwise the selection resets on every reopen.
-        var destIndex = destKey(doc.activeRunDestination).flatMap { activeKey in
-            cachedDestinations.firstIndex { destKey($0) == activeKey }
+        // Pick the destination last used for this (workspace, scheme); if there
+        // is none, or it no longer exists, fall back to the first candidate.
+        // `activeRunDestination` can't help here — it comes back as
+        // `missing value` over ScriptingBridge. The chosen destination is pushed
+        // to Xcode so a run uses what the UI shows.
+        let destContext = destinationContextKey(workspaceKey: key(doc), schemeName: activeSchemeName)
+        var destIndex = lastDestinationByContext[destContext].flatMap { lastKey in
+            cachedDestinations.firstIndex { destKey($0) == lastKey }
         }
-        if destIndex == nil, let remembered = selectedDestinationKey {
-            destIndex = cachedDestinations.firstIndex { destKey($0) == remembered }
+        if destIndex == nil, !cachedDestinations.isEmpty {
+            destIndex = 0
         }
-        if let destIndex { selectedDestinationKey = destKey(cachedDestinations[destIndex]) }
+        if let destIndex {
+            remember(destinationKey: destKey(cachedDestinations[destIndex]), for: destContext)
+            doc.setActiveRunDestination?(cachedDestinations[destIndex])
+        }
 
         return WorkspaceSnapshot(access: .ok, workspaces: workspaceInfos,
                                  schemes: schemeInfos, destinations: destInfos,
@@ -248,6 +261,16 @@ final class XcodeService: @unchecked Sendable {
     private func destKey(_ destination: XcodeRunDestination?) -> String? {
         guard let destination, let name = destination.name else { return nil }
         return "\(name)|\(destination.platform ?? "")"
+    }
+
+    private func destinationContextKey(workspaceKey: String?, schemeName: String?) -> String {
+        "\(workspaceKey ?? "")\u{1}\(schemeName ?? "")"
+    }
+
+    private func remember(destinationKey: String?, for context: String) {
+        guard let destinationKey, lastDestinationByContext[context] != destinationKey else { return }
+        lastDestinationByContext[context] = destinationKey
+        UserDefaults.standard.set(lastDestinationByContext, forKey: Self.destinationsDefaultsKey)
     }
 
     /// Scheme names the toolbar hides (`isShown = false` in any
