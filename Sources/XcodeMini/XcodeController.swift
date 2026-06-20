@@ -51,6 +51,8 @@ final class XcodeController {
     // MARK: - Selection
 
     func selectWorkspace(_ index: Int?) {
+        // Re-selecting the same value must not trigger a re-fetch.
+        guard index != selectedWorkspaceIndex else { return }
         // Optimistic update; schemes/destinations belong to the previous workspace.
         selectedWorkspaceIndex = index
         schemes = []
@@ -65,6 +67,8 @@ final class XcodeController {
     }
 
     func selectScheme(_ index: Int?) {
+        // Re-selecting the same value must not trigger a re-fetch.
+        guard index != selectedSchemeIndex else { return }
         // Optimistic update so the picker responds instantly.
         selectedSchemeIndex = index
         guard let index else {
@@ -81,6 +85,8 @@ final class XcodeController {
     }
 
     func selectDestination(_ index: Int?) {
+        // Re-selecting the same value must not re-apply.
+        guard index != selectedDestinationIndex else { return }
         selectedDestinationIndex = index
         if let index { service.selectDestination(index: index) }
     }
