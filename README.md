@@ -4,18 +4,20 @@ Xcode を ScriptingBridge 経由で操作する、メニューバー常駐の軽
 
 ## 機能
 
-- **実行** … アクティブな scheme / 実行先で `run`（⌘R 相当：ビルド+起動）
-- **停止** … 実行中のアクションを `stop`
-- **scheme 一覧・選択** … `active scheme` を切り替え
-- **実行先(run destination)一覧・選択** … `active run destination` を切り替え（シミュレータ・実機・My Mac を含む。scheme 依存）
+- **workspace 一覧・選択** … Xcode で開いている workspace を切り替え（既定は現在アクティブな workspace）
+- **scheme 一覧・選択** … `active scheme` を切り替え（ツールバー非表示の scheme は除外）
+- **実行先(run destination)一覧・選択** … `active run destination` を切り替え（シミュレータ・実機・My Mac を含む。scheme 依存）。直近の選択を (workspace, scheme) ごとに記憶
+- **実行** … 選択中の scheme / 実行先で `run`（⌘R 相当：ビルド+起動）
+- **停止** … 実行中のアクションを `stop`（実行中のときだけ活性化）
+- **ステータス表示** … 直近のアクション結果（実行中 / 成功 / 失敗 など）を表示。メニューを開いている間は 0.5 秒間隔で更新
 
-操作対象は Xcode で現在アクティブな workspace（`active workspace document`）に自動追従します。
+既定では Xcode で現在アクティブな workspace（`active workspace document`）を対象とし、ピッカーで他の開いている workspace に切り替えられます。
 
 ## 設計メモ
 
 - **形態**: SwiftUI `MenuBarExtra`（`.window` スタイル）のメニューバー常駐アプリ。
-- **方針**: ファイア&フォーゲット。コマンドは送るだけで、ビルド進捗/結果のポーリングはしない。
-- **唯一の例外フィードバック**: 自動化(TCC)許可・Xcode 未起動・workspace 未オープンは事前チェックして案内する。
+- **方針**: コマンドはファイア&フォーゲットで送る。状態フィードバックは、メニューを開いている間だけ `last scheme action result` を 0.5 秒間隔でポーリングして表示する（閉じると停止）。
+- **事前チェック**: 自動化(TCC)許可・Xcode 未起動・workspace 未オープンは事前チェックして案内する。
 - **ScriptingBridge**: 必要な範囲だけ手書きの `@objc protocol`（`Sources/XcodeMini/XcodeBridge.swift`）。
   参照用の完全なヘッダは次で再生成できる:
   ```sh
