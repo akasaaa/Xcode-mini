@@ -96,44 +96,65 @@ struct MenuContentView: View {
         }
     }
 
+    /// Fixed label width so all three pickers line up at the same left edge.
+    private static let pickerLabelWidth: CGFloat = 80
+
+    private func pickerLabel(_ text: String) -> some View {
+        Text(text)
+            .frame(width: Self.pickerLabelWidth, alignment: .trailing)
+            .foregroundStyle(.secondary)
+    }
+
     private var workspacePicker: some View {
-        Picker("Workspace", selection: Binding(
-            get: { controller.selectedWorkspaceIndex },
-            set: { controller.selectWorkspace($0) }
-        )) {
-            Text("—").tag(Int?.none)
-            ForEach(Array(controller.workspaces.enumerated()), id: \.offset) { idx, ws in
-                Text(ws.name).tag(Int?(idx))
+        HStack(spacing: 8) {
+            pickerLabel("Workspace")
+            Picker("Workspace", selection: Binding(
+                get: { controller.selectedWorkspaceIndex },
+                set: { controller.selectWorkspace($0) }
+            )) {
+                Text("—").tag(Int?.none)
+                ForEach(Array(controller.workspaces.enumerated()), id: \.offset) { idx, ws in
+                    Text(ws.name).tag(Int?(idx))
+                }
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
         }
-        .pickerStyle(.menu)
     }
 
     private var schemePicker: some View {
-        Picker("Scheme", selection: Binding(
-            get: { controller.selectedSchemeIndex },
-            set: { controller.selectScheme($0) }
-        )) {
-            Text("—").tag(Int?.none)
-            ForEach(Array(controller.schemes.enumerated()), id: \.offset) { idx, scheme in
-                Text(scheme.name).tag(Int?(idx))
+        HStack(spacing: 8) {
+            pickerLabel("Scheme")
+            Picker("Scheme", selection: Binding(
+                get: { controller.selectedSchemeIndex },
+                set: { controller.selectScheme($0) }
+            )) {
+                Text("—").tag(Int?.none)
+                ForEach(Array(controller.schemes.enumerated()), id: \.offset) { idx, scheme in
+                    Text(scheme.name).tag(Int?(idx))
+                }
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
         }
-        .pickerStyle(.menu)
         .disabled(controller.selectedWorkspaceIndex == nil)
     }
 
     private var destinationPicker: some View {
-        Picker("Destination", selection: Binding(
-            get: { controller.selectedDestinationIndex },
-            set: { controller.selectDestination($0) }
-        )) {
-            Text("—").tag(Int?.none)
-            ForEach(Array(controller.destinations.enumerated()), id: \.offset) { idx, dest in
-                Text(destinationLabel(dest)).tag(Int?(idx))
+        HStack(spacing: 8) {
+            pickerLabel("Destination")
+            Picker("Destination", selection: Binding(
+                get: { controller.selectedDestinationIndex },
+                set: { controller.selectDestination($0) }
+            )) {
+                Text("—").tag(Int?.none)
+                ForEach(Array(controller.destinations.enumerated()), id: \.offset) { idx, dest in
+                    Text(destinationLabel(dest)).tag(Int?(idx))
+                }
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
         }
-        .pickerStyle(.menu)
         .disabled(controller.selectedSchemeIndex == nil || controller.isLoading)
     }
 
