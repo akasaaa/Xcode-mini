@@ -117,7 +117,11 @@ struct MenuContentView: View {
                 get: { controller.selectedWorkspaceIndex },
                 set: { controller.selectWorkspace($0) }
             )) {
-                Text("—").tag(Int?.none)
+                // Placeholder only when there is nothing to choose; hidden once
+                // real options exist.
+                if controller.workspaces.isEmpty {
+                    Text("—").tag(Int?.none)
+                }
                 ForEach(Array(controller.workspaces.enumerated()), id: \.offset) { idx, ws in
                     Text(ws.name).tag(Int?(idx))
                 }
@@ -134,7 +138,9 @@ struct MenuContentView: View {
                 get: { controller.selectedSchemeIndex },
                 set: { controller.selectScheme($0) }
             )) {
-                Text("—").tag(Int?.none)
+                if controller.schemes.isEmpty {
+                    Text("—").tag(Int?.none)
+                }
                 ForEach(Array(controller.schemes.enumerated()), id: \.offset) { idx, scheme in
                     Text(scheme.name).tag(Int?(idx))
                 }
@@ -152,7 +158,9 @@ struct MenuContentView: View {
                 get: { controller.selectedDestinationIndex },
                 set: { controller.selectDestination($0) }
             )) {
-                Text("—").tag(Int?.none)
+                if controller.destinations.isEmpty {
+                    Text("—").tag(Int?.none)
+                }
                 ForEach(Array(controller.destinations.enumerated()), id: \.offset) { idx, dest in
                     Text(destinationLabel(dest)).tag(Int?(idx))
                 }
