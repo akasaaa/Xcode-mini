@@ -14,7 +14,11 @@ struct MenuContentView: View {
         }
         .padding(12)
         .frame(width: 300)
-        .onAppear { controller.refresh() }
+        .onAppear {
+            controller.refresh()
+            controller.startPolling()
+        }
+        .onDisappear { controller.stopPolling() }
     }
 
     // MARK: - Header
@@ -78,6 +82,7 @@ struct MenuContentView: View {
             workspacePicker
             schemePicker
             destinationPicker
+            statusRow
 
             HStack(spacing: 8) {
                 Button(action: controller.run) {
@@ -160,6 +165,54 @@ struct MenuContentView: View {
 
     private func destinationLabel(_ dest: DestinationInfo) -> String {
         dest.platform.isEmpty ? dest.name : "\(dest.name) — \(dest.platform)"
+    }
+
+    // MARK: - Status
+
+    private var statusRow: some View {
+        HStack(spacing: 8) {
+            pickerLabel("Status")
+            statusIndicator
+            Text(statusText)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private var statusIndicator: some View {
+        switch controller.runStatus {
+        case .running, .notStarted:
+            ProgressView().controlSize(.small)
+        default:
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+        }
+    }
+
+    private var statusText: String {
+        switch controller.runStatus {
+        case .none: return "—"
+        case .notStarted: return "Starting…"
+        case .running: return "Running"
+        case .cancelled: return "Stopped"
+        case .failed: return "Failed"
+        case .error: return "Error"
+        case .succeeded: return "Succeeded"
+        }
+    }
+
+    private var statusColor: Color {
+        switch controller.runStatus {
+        case .running, .notStarted: return .accentColor
+        case .succeeded: return .green
+        case .failed, .error: return .red
+        case .cancelled: return .orange
+        case .none: return .secondary
+        }
     }
 
     // MARK: - Footer

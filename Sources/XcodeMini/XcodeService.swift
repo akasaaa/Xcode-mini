@@ -10,6 +10,22 @@ enum XcodeAccess: Sendable {
     case xcodeNotRunning
 }
 
+/// State of the selected workspace's most recent scheme action (run/build/test).
+/// Mirrors Xcode's `scheme action result status`, plus `.none` for "no action
+/// has run yet / unknown".
+enum RunStatus: Sendable {
+    case none
+    case notStarted
+    case running
+    case cancelled
+    case failed
+    case error
+    case succeeded
+
+    /// True while an action is in progress and therefore stoppable.
+    var isStoppable: Bool { self == .running || self == .notStarted }
+}
+
 /// Plain, Sendable value types handed to the main actor for display.
 /// SBObjects never cross the actor boundary.
 struct WorkspaceInfo: Sendable {
@@ -88,6 +104,15 @@ final class XcodeService: @unchecked Sendable {
                 _ = self.checkPermission(prompt: true)
                 cont.resume(returning: self.loadSnapshot())
             }
+        }
+    }
+
+    /// Cheap, poll-friendly read of the selected document's current run status.
+    /// Only touches `lastSchemeActionResult.status` (one property), so it can run
+    /// on a short interval without the cost of a full snapshot reload.
+    func runStatus() async -> RunStatus {
+        await withCheckedContinuation { cont in
+            queue.async { cont.resume(returning: self.currentRunStatus()) }
         }
     }
 
@@ -224,6 +249,36 @@ final class XcodeService: @unchecked Sendable {
         cachedWorkspaces = []
         cachedSchemes = []
         cachedDestinations = []
+    }
+
+    /// Reads the selected document's last scheme action status. Returns `.none`
+    /// when Xcode is unavailable, access is missing, no workspace is selected,
+    /// or no action has run yet. Relies on the cache populated by `loadSnapshot`.
+    private func currentRunStatus() -> RunStatus {
+        guard isXcodeRunning,
+              checkPermission(prompt: false) == .ok,
+              let doc = selectedDocument(),
+              let result = doc.lastSchemeActionResult else { return .none }
+        return mapRunStatus(result.status ?? 0)
+    }
+
+    /// Maps Xcode's `scheme action result status` four-char code to `RunStatus`.
+    private func mapRunStatus(_ code: AEKeyword) -> RunStatus {
+        switch fourCharString(code) {
+        case "srsn": return .notStarted
+        case "srsr": return .running
+        case "srsc": return .cancelled
+        case "srsf": return .failed
+        case "srse": return .error
+        case "srss": return .succeeded
+        default: return .none
+        }
+    }
+
+    private func fourCharString(_ code: AEKeyword) -> String {
+        let bytes = [UInt8((code >> 24) & 0xff), UInt8((code >> 16) & 0xff),
+                     UInt8((code >> 8) & 0xff), UInt8(code & 0xff)]
+        return String(bytes: bytes, encoding: .macOSRoman) ?? ""
     }
 
     /// Open workspace documents: every document whose name ends with
