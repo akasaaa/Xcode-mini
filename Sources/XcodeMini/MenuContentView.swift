@@ -161,8 +161,14 @@ struct MenuContentView: View {
                 if controller.destinations.isEmpty {
                     Text("—").tag(Int?.none)
                 }
-                ForEach(Array(controller.destinations.enumerated()), id: \.offset) { idx, dest in
-                    Text(destinationLabel(dest)).tag(Int?(idx))
+                // Group by platform so simulators, devices and Mac are separated
+                // under section headers in the dropdown.
+                ForEach(destinationGroups) { group in
+                    Section(group.category) {
+                        ForEach(group.items) { item in
+                            Text(item.info.name).tag(Int?(item.index))
+                        }
+                    }
                 }
             }
             .labelsHidden()
@@ -171,8 +177,46 @@ struct MenuContentView: View {
         .disabled(controller.selectedSchemeIndex == nil || controller.isLoading)
     }
 
-    private func destinationLabel(_ dest: DestinationInfo) -> String {
-        dest.platform.isEmpty ? dest.name : "\(dest.name) — \(dest.platform)"
+    private struct DestinationItem: Identifiable {
+        let index: Int          // index into controller.destinations (the tag)
+        let info: DestinationInfo
+        var id: Int { index }
+    }
+
+    private struct DestinationGroup: Identifiable {
+        let category: String
+        let items: [DestinationItem]
+        var id: String { category }
+    }
+
+    /// Destinations grouped by platform category, in first-appearance order
+    /// (Xcode already returns Mac/device first, then simulators).
+    private var destinationGroups: [DestinationGroup] {
+        var order: [String] = []
+        var byCategory: [String: [DestinationItem]] = [:]
+        for (index, info) in controller.destinations.enumerated() {
+            let category = destinationCategory(info.platform)
+            if byCategory[category] == nil { order.append(category) }
+            byCategory[category, default: []].append(DestinationItem(index: index, info: info))
+        }
+        return order.map { DestinationGroup(category: $0, items: byCategory[$0]!) }
+    }
+
+    /// Friendly section title for a run destination's `platform` identifier.
+    private func destinationCategory(_ platform: String) -> String {
+        switch platform {
+        case "macosx": return "macOS"
+        case "iphoneos": return "iOS"
+        case "iphonesimulator": return "iOS Simulator"
+        case "appletvos": return "tvOS"
+        case "appletvsimulator": return "tvOS Simulator"
+        case "watchos": return "watchOS"
+        case "watchsimulator": return "watchOS Simulator"
+        case "xros": return "visionOS"
+        case "xrsimulator": return "visionOS Simulator"
+        case "": return "Other"
+        default: return platform
+        }
     }
 
     // MARK: - Status
