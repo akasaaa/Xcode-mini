@@ -20,6 +20,10 @@ final class XcodeController {
     private(set) var selectedSchemeIndex: Int?
     private(set) var selectedDestinationIndex: Int?
 
+    /// Live status of the selected workspace's most recent scheme action,
+    /// refreshed by `startPolling()` while the menu is open.
+    private(set) var runStatus: RunStatus = .none
+
     /// A background read is in flight.
     private(set) var isLoading = false
     /// False until the first snapshot arrives, so the UI can show a placeholder
@@ -29,6 +33,8 @@ final class XcodeController {
     @ObservationIgnored private let service = XcodeService()
     /// Identifies the latest request so stale snapshots are discarded.
     @ObservationIgnored private var loadToken = 0
+    /// Repeating status poll; runs only while the menu is open.
+    @ObservationIgnored private var pollingTask: Task<Void, Never>?
 
     // MARK: - Loads (non-blocking)
 
@@ -46,6 +52,25 @@ final class XcodeController {
             let snapshot = await service.requestAccess()
             apply(snapshot, token: token)
         }
+    }
+
+    // MARK: - Status polling (active only while the menu is open)
+
+    /// Starts polling the run status every half second. Idempotent.
+    func startPolling() {
+        guard pollingTask == nil else { return }
+        pollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { break }
+                self.runStatus = await self.service.runStatus()
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+
+    func stopPolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
     }
 
     // MARK: - Selection
@@ -100,10 +125,9 @@ final class XcodeController {
             && selectedDestinationIndex != nil
     }
 
+    /// Stop is enabled only while an action is actually in progress.
     var canStop: Bool {
-        access == .ok
-            && selectedWorkspaceIndex != nil
-            && selectedSchemeIndex != nil
+        access == .ok && runStatus.isStoppable
     }
 
     func run() {

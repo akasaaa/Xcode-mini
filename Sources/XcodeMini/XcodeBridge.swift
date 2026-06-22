@@ -28,6 +28,9 @@ import ScriptingBridge
 @objc protocol XcodeSchemeActionResult {
     @objc optional var id: String { get }
     @objc optional var completed: Bool { get }
+    // `scheme action result status` enum. ScriptingBridge returns the value as
+    // its raw four-char code (e.g. 'srsr' = running, 'srss' = succeeded).
+    @objc optional var status: AEKeyword { get }
 }
 
 @objc protocol XcodeWorkspaceDocument {
@@ -53,6 +56,10 @@ import ScriptingBridge
     @objc optional func runWithCommandLineArguments(_ commandLineArguments: [Any]?,
                                                     withEnvironmentVariables environmentVariables: [Any]?) -> XcodeSchemeActionResult
     @objc optional func stop()
+
+    // Tracks the most recent scheme action (run/build/test, started from our UI
+    // or Xcode's). `missing value` until an action has run.
+    @objc optional var lastSchemeActionResult: XcodeSchemeActionResult { get }
 }
 
 @objc protocol XcodeApplication {
